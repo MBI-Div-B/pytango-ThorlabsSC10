@@ -1,132 +1,255 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-
-# Copyright (C) 2020  MBI-Division-B
-# MIT License, refer to LICENSE file
-# Author: Luca Barbera / Email: barbera@mbi-berlin.de
-
-
-from tango import AttrWriteType, DevState, DebugIt, DispLevel
+#!/usr/bin/python3 -u
+from tango import AttrWriteType, DevState, DispLevel
 from tango.server import Device, attribute, command, device_property
 
-# import the drivers you will use
+import instruments as ik
+from enum import IntEnum
 
 
-class TemplateDeviceServer(Device):
+
+class Mode(IntEnum):
+    manual = 0
+    auto = 1
+    single = 2
+    repeat = 3
+    external = 4
+
+
+class TriggerMode(IntEnum):
+    internal = 0
+    external = 1
+
+
+class ExTriggerMode(IntEnum):
+    shutter = 0
+    controller = 1
+
+
+class BaudRate(IntEnum):
+    _9600 = 0
+    _11500 = 1
+
+
+class ThorlabsSC10(Device):
+    '''ThorlabsSC10
+
+    This controls the Thorlabs SC10 shutter controller
+
     '''
-    This docstring should describe your Tango Class and optionally
-    what it depends on (drivers etc).
-    '''
 
+    Port = device_property(dtype=str, default_value='/dev/ttyUSB0')
+    Baudrate = device_property(dtype=int, default_value=9600)
+    Timeout = device_property(dtype=float, default_value=1)
+    
+    # device attributes
+    enabled = attribute(
+        dtype='bool',
+        label='Enabled',
+        access=AttrWriteType.READ,
+        display_level=DispLevel.OPERATOR,
+        doc='Returns "0" if the shutter is disabled and "1" if enabled',
+    )
+    
+    open = attribute(
+        dtype='bool',
+        label='Open',
+        access=AttrWriteType.READ,
+        display_level=DispLevel.OPERATOR,
+        doc='Returns "1" if the shutter is open or "0" if cloesed.',
+    )
+    
+    interlock = attribute(
+        dtype='bool',
+        label='Interlock',
+        access=AttrWriteType.READ,
+        display_level=DispLevel.OPERATOR,
+        doc='Returns "1" if interlock is tripped, otherwise "0".'
+    )
+    
+    repeat_count = attribute(
+        dtype='int',
+        label='Repeat Count',
+        access=AttrWriteType.READ_WRITE,
+        display_level=DispLevel.OPERATOR,
+        min_value=1,
+        max_value=99,
+        doc='Repeat count for repeat mode. The value nmust be from 1 to 99.'
+    )
+    
+    baudrate = attribute(
+        dtype=BaudRate,
+        label='Baud Rate',
+        access=AttrWriteType.READ,
+        display_level=DispLevel.EXPERT,
+        doc='Either 9600 or 115000'
+    )
 
-# ------ Attributes ------ #
+    mode = attribute(
+        dtype=Mode,
+        label='Mode',
+        access=AttrWriteType.READ_WRITE,
+        display_level=DispLevel.OPERATOR,
+        doc='''The operating mode values:
+mode=1: Sets the unit to Manual Mode
+mode=2: Sets the unit to Auto Mode
+mode=3: Sets the unit to Single Mode
+mode=4: Sets the unit to Repeat Mode
+mode=5: Sets the unit to the External Gate Mode
+'''
+    )
+        
+    trigger_mode = attribute(
+        dtype=TriggerMode,
+        label='Trigger Mode',
+        access=AttrWriteType.READ_WRITE,
+        display_level=DispLevel.OPERATOR,
+        doc='''The trigger mode (see section 4.1.4 for more details)
+trig=0: Internal trigger mode
+trig=1: External trigger mode
+'''
+    )
 
-    humidity = attribute(label='Humidity',
-                         dtype=float,
-                         access=AttrWriteType.READ,
-                         doc='Example for an attribute that can only be read.')
+    extrigger_mode = attribute(
+        dtype=ExTriggerMode,
+        label='Ex-Trigger Mode',
+        access=AttrWriteType.READ_WRITE,
+        display_level=DispLevel.OPERATOR,
+        doc='''The ex-trigger mode
+xto=0: Trigger Out TTL follows shutter output.
+xto=1: Trigger Out TTL follows controller output. 
+'''
+    )
 
-    # optionally use fget/fset to point to read and write functions.
-    # Default is "read_temperature"/"write_temperature".
-    # Added some optional attribute properties.
-    temperature = attribute(label='Temperature',
-                            fget='get_temperature',
-                            dtype=float,
-                            access=AttrWriteType.READ_WRITE,
-                            display_level=DispLevel.EXPERT,
-                            min_value=-273.15,
-                            min_alarm=-100,
-                            max_alarm=100,
-                            min_warning=-50,
-                            max_warning=50,
-                            unit='C',
-                            format="8.4f",
-                            doc='Attribute that can be read/written.')
+    open_duration = attribute(
+        dtype='int',
+        format='%6d',
+        label='Open Duration',
+        access=AttrWriteType.READ_WRITE,
+        display_level=DispLevel.OPERATOR,
+        min_value=0,
+        max_value=999999,
+        unit='ms',
+        doc='The shutter open time.'
+    )
 
+    close_duration = attribute(
+        dtype='int',
+        format='%6d',
+        label='Close Duration',
+        access=AttrWriteType.READ_WRITE,
+        display_level=DispLevel.OPERATOR,
+        min_value=0,
+        max_value=999999,
+        unit='ms',
+        doc='The shutter close time.'
+    )
 
-# ------ Device Properties ------ #
-    # device_properties will be set once per family-member and usually -
-    # contain serial numbers or a certain port-ID that needs to be set once -
-    # and will not change while the server is running.
-
-    port = device_property(dtype=int, default_value=10000)
-
-# ------ default functions that are inherited from parent "Device" ------ #
     def init_device(self):
         Device.init_device(self)
         self.info_stream('Connection established')  # prints this line while -
         # in logging mode "info" or lower
         self.set_state(DevState.ON)
-
-        # here you could initiate first contact to the hardware (driver)
-
-        self.__temp = 0  # declaring values for the attributes if needed
-        self.__humid = 0
+        self.sc = ik.thorlabs.SC10.open_serial(self.Port, self.Baudrate, timeout=self.Timeout)
+        self.id = self.sc.query('id?')
+        self.__enabled = False
+        self.__open = False
+        self.__interlock = False        
 
     def delete_device(self):
         self.set_state(DevState.OFF)
-        self.error_stream('A device was deleted!')  # prints this line while -
-        # in logging mode "error" or lower.
+        del self.sc
+        self.info_stream('Device was deleted!')
 
-    # define what is executed when Tango checks for the state.
-    # Here you could inquire the state of the hardware and not just -
-    # (as it is in default) of the TDS.
-    # Default returns state but also sets state from ON to ALARM if -
-    # some attribute alarm limits are surpassed.
     def dev_state(self):
-        # possible pseudo code:
-        # if hardware-state and TDS-state is ON:
-        #   return DevState.ON
-        # else:
-        #   return DevState.FAULT
-        return DevState
+        self.__enabled = bool(int(self.sc.query('ens?')))
+        self.__open = not bool(int(self.sc.query('closed?')))
+        self.__interlock = bool(int(self.sc.query('interlock?')))
+        if self.__open:
+            self.set_status('{:s}\nDevice is OPEN'.format(self.id))
+            return DevState.OPEN
+        else:
+            self.set_status('{:s}\nDevice is CLOSED'.format(self.id))
+            return DevState.CLOSE
 
     def always_executed_hook(self):
-        # a method that is executed continuously and by default does nothing.
-        # if you want smth done polled/continuously, put it in this method.
-        # check connection to hardware or whether status is acceptable etc.
-        pass
+        self.dev_state()
 
-# ------ Read/Write functions ------ #
-    def read_humidity(self):  # this is default to read humidity
-        return self.__humid  # returns the value of the "humidity" attr.
+    def read_enabled(self):
+        return self.__enabled
 
-    def get_temperature(self):  # this was set by fget in attribute declaration
-        return self.__temp
+    def read_open(self):
+        return self.__open
 
-    def write_temperature(self, value):
-        # possibly execute some function here to talk to the hardware -
-        # (e.g. set temperature with a thermostat)
-        self.__temp = value  # update the declared server value of the attr.
+    def read_interlock(self):
+        return self.__interlock
 
-# ------ Internal Methods ------ #
-    # method that works with multiple input parameters only "inside" this code
+    def read_baudrate(self):
+        return BaudRate._115000 if bool(int(self.sc.query('baud?'))) else BaudRate._9600
 
-    def internal_method(self, param1, param2):
-        # do something with param1, param2
-        pass
+    def read_mode(self):
+        return int(self.sc.query('mode?'))-1
+
+    def write_mode(self, value):
+        self.sc.sendcmd('mode={:d}'.format(value+1))
+
+    def read_trigger_mode(self):
+        return int(self.sc.query('trig?'))
+
+    def write_trigger_mode(self, value):
+        self.sc.sendcmd('trig={:d}'.format(value))
+        
+    def read_extrigger_mode(self):
+        return int(self.sc.query('xto?'))
+
+    def write_extrigger_mode(self, value):
+        self.sc.sendcmd('xto={:d}'.format(value))
+        
+    def read_repeat_count(self):
+        return int(self.sc.query('rep?'))
+
+    def write_repeat_count(self, value):
+        self.sc.sendcmd('rep={:d}'.format(value))
+
+    def read_open_duration(self):
+        return int(self.sc.query('open?'))
+
+    def write_open_duration(self, value):
+        self.sc.sendcmd('open={:d}'.format(value))
+
+    def read_close_duration(self):
+        return int(self.sc.query('shut?'))
+
+    def write_close_duration(self, value):
+        self.sc.sendcmd('shut={:d}'.format(value))
 
 
-# ------ COMMANDS ------ #
-
-    @DebugIt()  # let the execution of this command be logged in debugging mode
-    @command()  # make method executable through the client -
-    # (as opposed to just callable inside this code)
-    def external_method(self, param):
-        # this kind of method only allows one input parameter
-        pass
-
-    # more examples of externally executable methods
     @command()
-    def turn_off(self):
-        self.set_state(DevState.OFF)
+    def enable(self):
+        if self.__enabled:
+            self.debug_stream('shutter already enabled')
+        else:
+            self.debug_stream('enable shutter')
+            self.sc.sendcmd('ens')
 
     @command()
-    def turn_on(self):
-        self.set_state(DevState.ON)
-
-
+    def disable(self):
+        if self.__enabled:
+            self.debug_stream('disable shutter')
+            self.sc.sendcmd('ens')
+        else:
+            self.debug_stream('shutter already disabled')
+        
+    @command(doc_in='Store config (ex. mode, open time, closed time) into EEPROM.')
+    def store_config(self):
+        self.debug_stream('store config')
+        self.sc.sendcmd('savp')
+        
+    @command(doc_in='Load config from EEPROM.')    
+    def restore_config(self):
+        self.debug_stream('load config')
+        self.sc.sendcmd('resp')
+        
+        
 # start the server
 if __name__ == "__main__":
-    TemplateDeviceServer.run_server()
+    ThorlabsSC10.run_server()
