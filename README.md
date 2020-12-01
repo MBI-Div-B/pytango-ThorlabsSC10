@@ -1,13 +1,17 @@
-# Template for a Tango Device Server
-This is a template for what your Readme for a Tango Device Server should look like. This first abstract should summarize what your Tango DS is for.
-Direct further documentation of classes or methods used to the <em>docs</em> folder. Make sure the manuals you upload to <em>manuals</em> are freely accessible. 
+# ThorlabsSC10 Tango device server
+
+This a Tango device server written in PyTango for a Thorlabs SC10 shutter controller.
 
 ## Installation
-Describe how to install necessary packages (maybe drivers) needed for your Tango DS. Maybe it is needed to install by <code>pip3</code> or clone and install from another git.
 
-## Configuration
-(Optional)  
-Add some configuration details that need to be set up when registering the Server (which device properties to declare etc.).
+Currently [InstrumentKit](https://github.com/Galvant/InstrumentKit) is used for communication via serial. This might be changed in future.
+In order to make InstrumentKit run properly with the SC10, the is a small bug fix applied - so use the according fork+branch:
+
+    git clone --branch stripread https://github.com/MBI-Div-B/InstrumentKit.git
+    cd InstrumentKit
+    pip3 install -e .
 
 ## Authors
-Refer to your organization and leave some contact details of how to reach you in case there are any questions. 
+* Daniel Schick
+
+
