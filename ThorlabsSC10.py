@@ -165,19 +165,17 @@ xto=1: Trigger Out TTL follows controller output.
         del self.sc
         self.info_stream('Device was deleted!')
 
-    def dev_state(self):        
+    def always_executed_hook(self):
         self.__enabled = bool(int(self.sc.query('ens?')))
         self.__open = not bool(int(self.sc.query('closed?')))
         self.__interlock = bool(int(self.sc.query('interlock?')))
         if self.__open:
             self.set_status('Device is OPEN')
+            self.set_state(DevState.OPEN)
             return DevState.OPEN
         else:
             self.set_status('Device is CLOSED')
-            return DevState.CLOSE
-
-    def always_executed_hook(self):
-        self.dev_state()
+            self.set_state(DevState.CLOSE)
 
     def read_enabled(self):
         return self.__enabled
