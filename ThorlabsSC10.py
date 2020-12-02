@@ -6,7 +6,6 @@ import instruments as ik
 from enum import IntEnum
 
 
-
 class Mode(IntEnum):
     manual = 0
     auto = 1
@@ -27,7 +26,7 @@ class ExTriggerMode(IntEnum):
 
 class BaudRate(IntEnum):
     _9600 = 0
-    _11500 = 1
+    _115200 = 1
 
 
 class ThorlabsSC10(Device):
@@ -79,9 +78,9 @@ class ThorlabsSC10(Device):
     baudrate = attribute(
         dtype=BaudRate,
         label='Baud Rate',
-        access=AttrWriteType.READ,
+        access=AttrWriteType.READ_WRITE,
         display_level=DispLevel.EXPERT,
-        doc='Either 9600 or 115000'
+        doc='Either 9600 or 115200'
     )
 
     mode = attribute(
@@ -146,29 +145,35 @@ xto=1: Trigger Out TTL follows controller output.
 
     def init_device(self):
         Device.init_device(self)
-        self.info_stream('Connection established')  # prints this line while -
-        # in logging mode "info" or lower
-        self.set_state(DevState.ON)
-        self.sc = ik.thorlabs.SC10.open_serial(self.Port, self.Baudrate, timeout=self.Timeout)
-        self.id = self.sc.query('id?')
         self.__enabled = False
         self.__open = False
-        self.__interlock = False        
-
+        self.__interlock = False
+        self.info_stream('Connecting to serial port {:s} with baudrate {:d} ...'.format(self.Port, self.Baudrate))
+        try:
+            self.sc = ik.thorlabs.SC10.open_serial(self.Port, self.Baudrate, timeout=self.Timeout)
+            self.sc.prompt = '> '
+            name = self.sc.query('id?')
+            self.info_stream('Connection established: {:s}'.format(name))
+            self.set_state(DevState.ON)
+        except:
+            self.error_stream('Cannot connect!')
+            self.set_state(DevState.OFF)
+            
+            
     def delete_device(self):
         self.set_state(DevState.OFF)
         del self.sc
         self.info_stream('Device was deleted!')
 
-    def dev_state(self):
+    def dev_state(self):        
         self.__enabled = bool(int(self.sc.query('ens?')))
         self.__open = not bool(int(self.sc.query('closed?')))
         self.__interlock = bool(int(self.sc.query('interlock?')))
         if self.__open:
-            self.set_status('{:s}\nDevice is OPEN'.format(self.id))
+            self.set_status('Device is OPEN')
             return DevState.OPEN
         else:
-            self.set_status('{:s}\nDevice is CLOSED'.format(self.id))
+            self.set_status('Device is CLOSED')
             return DevState.CLOSE
 
     def always_executed_hook(self):
@@ -184,7 +189,10 @@ xto=1: Trigger Out TTL follows controller output.
         return self.__interlock
 
     def read_baudrate(self):
-        return BaudRate._115000 if bool(int(self.sc.query('baud?'))) else BaudRate._9600
+        return BaudRate._115200 if bool(int(self.sc.query('baud?'))) else BaudRate._9600
+
+    def write_baudrate(self, value):
+        self.sc.sendcmd('baud={:d}'.format(value))
 
     def read_mode(self):
         return int(self.sc.query('mode?'))-1
