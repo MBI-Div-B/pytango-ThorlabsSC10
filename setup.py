@@ -12,7 +12,7 @@ setup(
     packages=["tangods_thorlabssc10"],
     install_requires=[
         "pytango",
-        "instrumentkit" @ git+https://github.com/instrumentkit/InstrumentKit@releases/tag/v1.0.0b1 # which version? library is updating so far...
+        "instrumentkit @ git+https://github.com/instrumentkit/InstrumentKit@v1.0.0b1",
     ],
     url="https://github.com/MBI-Div-b/pytango-ThorlabsSC10",
     keywords=[
